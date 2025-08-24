@@ -1036,10 +1036,15 @@ app.post("/api/generate-pdf", async (req, res) => {
 
     console.log("Final filename:", finalFileName);
 
+     // Use chromium for Render deployment
     const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
+
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 1600 });

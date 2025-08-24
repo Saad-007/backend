@@ -394,10 +394,20 @@ app.post("/api/generate-analysis-pdf", async (req, res) => {
   try {
     const { analysisData, resumeData } = req.body;
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+const browser = await puppeteer.launch({
+  headless: true,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage', // Reduces memory usage
+    '--disable-accelerated-2d-canvas',
+    '--no-first-run',
+    '--no-zygote',
+    '--single-process', // Runs in single process mode
+    '--disable-gpu'
+  ],
+  timeout: 30000 // 30 second timeout
+});
 
     const page = await browser.newPage();
     
@@ -1036,10 +1046,20 @@ app.post("/api/generate-pdf", async (req, res) => {
 
     console.log("Final filename:", finalFileName);
 
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+   const browser = await puppeteer.launch({
+  headless: true,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage', // Reduces memory usage
+    '--disable-accelerated-2d-canvas',
+    '--no-first-run',
+    '--no-zygote',
+    '--single-process', // Runs in single process mode
+    '--disable-gpu'
+  ],
+  timeout: 30000 // 30 second timeout
+});
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1200, height: 1600 });

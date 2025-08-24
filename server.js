@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const fetch = require("node-fetch");
-const puppeteer = require("puppeteer");
 require("dotenv").config();
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
@@ -11,7 +10,8 @@ const { createWorker } = require("tesseract.js");
 const pdftotext = require("pdftotextjs");
 const htmlToDocx = require('html-to-docx');
 const app = express();
-
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 // Configuration
 const PORT = process.env.PORT || 5000;
 const UPLOAD_DIR = "uploads";

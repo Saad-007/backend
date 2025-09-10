@@ -12,6 +12,7 @@ const htmlToDocx = require('html-to-docx');
 const app = express();
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
+const  fetchJobs  =require ("./utills/jobFetcher");
 // Configuration
 const PORT = process.env.PORT || 5000;
 const UPLOAD_DIR = "uploads";
@@ -66,8 +67,10 @@ if (!GROQ_API_KEY) {
   process.exit(1);
 }
 
-const MODEL = "llama3-70b-8192";
+// Use the latest supported Groq model
+const MODEL = "llama-3.3-70b-versatile";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
+
 
 // Enhanced API call with better error handling
 const callGroq = async (messages) => {
@@ -204,6 +207,7 @@ const validateFile = async (req, res, next) => {
   next();
 };
 
+
 // Resume Feedback Endpoint// Resume Feedback Endpoint - IMPROVED VERSION
 app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (req, res, next) => {
   let filePath;
@@ -286,6 +290,7 @@ app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (r
     }
 
     // Validate and sanitize the response
+       // ✅ Validate and sanitize the response
     const responseData = {
       overallScore: Math.min(Math.max(Number(result.overallScore) || 50, 0), 100),
       categories: Array.isArray(result.categories) 
@@ -319,6 +324,9 @@ app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (r
       atsScore: Math.min(Math.max(Number(result.atsScore) || 60, 0), 100)
     };
 
+    // ✅ Fetch jobs here (after we have jobTitleMatch & strengths)
+    const jobs = await fetchJobs(responseData.jobTitleMatch, responseData.strengths);
+
     // Ensure we have at least some data
     if (responseData.suggestions.length === 0) {
       responseData.suggestions = [
@@ -338,15 +346,18 @@ app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (r
       ];
     }
 
+    // ✅ Now return jobs with feedback
     return res.json({
       success: true,
       data: responseData,
+      jobs,
       metadata: {
         processedLength: resumeText.length,
         analyzedDate: new Date().toISOString(),
         model: MODEL
       }
     });
+
 
   } catch (error) {
     console.error("Resume feedback error:", error);
@@ -389,6 +400,19 @@ app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (r
     }
   }
 });
+// ----------------- Jobs API -----------------
+app.get("/api/jobs", async (req, res) => {
+  try {
+    const search = req.query.search || "developer";
+    const jobs = await fetchJobs(search);
+
+    res.json({ jobs });
+  } catch (error) {
+    console.error("Jobs fetch error:", error);
+    res.status(500).json({ error: "Failed to fetch jobs" });
+  }
+});
+
 // Alternative PDF endpoint with custom template
 app.post("/api/generate-analysis-pdf", async (req, res) => {
   try {

@@ -71,6 +71,27 @@ if (!GROQ_API_KEY) {
 const MODEL = "llama-3.3-70b-versatile";
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
+// ✅ Put this ONCE at the top of server.js (after imports)
+async function getEmbeddingScore(resumeText, jobDescription) {
+  try {
+    const response = await fetch("http://127.0.0.1:8001/match", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resume_text: resumeText, job_description: jobDescription })
+    });
+
+    if (!response.ok) {
+      console.error("Embedding API failed:", response.statusText);
+      return { similarity_score: null };
+    }
+
+    return await response.json(); // { similarity_score: 60.18 }
+  } catch (err) {
+    console.error("Embedding API error:", err.message);
+    return { similarity_score: null };
+  }
+}
+
 
 // Enhanced API call with better error handling
 const callGroq = async (messages) => {
@@ -207,11 +228,47 @@ const validateFile = async (req, res, next) => {
   next();
 };
 
+ async function getEmbeddingScore(resumeText, jobDescription) {
+  const response = await fetch(`${process.env.EMBED_API_URL}/match`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      resume_text: resumeText,
+      job_description: jobDescription,
+    }),
+  });
 
-// Resume Feedback Endpoint// Resume Feedback Endpoint - IMPROVED VERSION
+  if (!response.ok) {
+    throw new Error("Embedding API failed: " + response.statusText);
+  }
+
+  return response.json(); // { similarity_score: 60.18 }
+}
+// Resume Feedback Endpoint - IMPROVED + Embedding Integration
 app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (req, res, next) => {
   let filePath;
-  
+
+  // 🔹 Helper function to call FastAPI embedding service
+  async function getEmbeddingScore(resumeText, jobDescription) {
+    try {
+      const response = await fetch(`${process.env.EMBED_API_URL}/match/match`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume_text: resumeText, job_description: jobDescription })
+      });
+
+      if (!response.ok) {
+        console.error("Embedding API failed:", response.statusText);
+        return { similarity_score: null };
+      }
+
+      return await response.json(); // { similarity_score: 60.18 }
+    } catch (err) {
+      console.error("Embedding API error:", err.message);
+      return { similarity_score: null };
+    }
+  }
+
   try {
     filePath = req.file.path;
     let resumeText;
@@ -231,51 +288,47 @@ app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (r
         throw new Error("Unsupported file type");
     }
 
-    // Validate that we actually got resume text
     if (!resumeText || resumeText.trim().length < 50) {
       throw new Error("Resume text is too short or could not be extracted properly");
     }
 
-    const messages = [{
-      role: "system",
-      content: `You are a professional resume analyst with 15+ years of experience in HR and recruitment. 
-      Provide comprehensive feedback in this EXACT JSON format:
+    // 🔹 Build messages for Groq
+    const messages = [
       {
-        "overallScore": number (0-100),
-        "categories": [ 
-          {
-            "name": string (e.g., "Formatting & Structure", "Content Quality", "Skills Presentation", "Achievements", "Customization"),
-            "score": number (0-10),
-            "feedback": string (detailed feedback with specific examples)
-          }
-        ],
-        "strengths": string[] (list of 3-5 key strengths),
-        "suggestions": string[] (list of 5-10 actionable suggestions),
-        "jobTitleMatch": string (suggested job title based on content),
-        "keywordAnalysis": [
-          {
-            "keyword": string,
-            "count": number,
-            "importance": "high" | "medium" | "low",
-            "recommendation": string
-          }
-        ],
-        "atsScore": number (0-100, compatibility with Applicant Tracking Systems)
+        role: "system",
+        content: `You are a professional resume analyst with 15+ years of experience in HR and recruitment. 
+        Provide comprehensive and honest feedback in this EXACT JSON format:
+        {
+          "overallScore": number (0-100),
+          "categories": [ 
+            {
+              "name": string,
+              "score": number (0-10),
+              "feedback": string
+            }
+          ],
+          "strengths": string[],
+          "suggestions": string[],
+          "jobTitleMatch": string,
+          "keywordAnalysis": [
+            {
+              "keyword": string,
+              "count": number,
+              "importance": "high" | "medium" | "low",
+              "recommendation": string
+            }
+          ],
+          "atsScore": number (0-100)
+        }`
+      },
+      {
+        role: "user",
+        content: `Please analyze this resume and provide comprehensive feedback:\n\n${resumeText.substring(0, 10000)}`
       }
-      
-      IMPORTANT: 
-      - Be specific and actionable in feedback
-      - Provide concrete examples from the resume
-      - Score realistically (average resumes should be 60-75)
-      - Suggest improvements that can be implemented immediately
-      - Focus on modern resume standards (2024)`
-    }, {
-      role: "user",
-      content: `Please analyze this resume and provide comprehensive feedback:\n\n${resumeText.substring(0, 10000)}` // Limit to first 10k chars
-    }];
+    ];
 
+    // 🔹 Call Groq API
     const groqResponse = await callGroq(messages);
-    
     if (!groqResponse.choices?.[0]?.message?.content) {
       throw new Error("Invalid response structure from AI service");
     }
@@ -285,68 +338,41 @@ app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (r
       result = JSON.parse(groqResponse.choices[0].message.content);
     } catch (parseError) {
       console.error("JSON parse error:", parseError);
-      console.error("Raw response:", groqResponse.choices[0].message.content);
       throw new Error("Failed to parse AI response as JSON");
     }
 
-    // Validate and sanitize the response
-       // ✅ Validate and sanitize the response
+    // 🔹 Validate & sanitize Groq response
     const responseData = {
       overallScore: Math.min(Math.max(Number(result.overallScore) || 50, 0), 100),
-      categories: Array.isArray(result.categories) 
+      categories: Array.isArray(result.categories)
         ? result.categories.map(cat => ({
             name: String(cat.name || "Uncategorized"),
             score: Math.min(Math.max(Number(cat.score) || 5, 0), 10),
-            feedback: String(cat.feedback || "No specific feedback provided")
+            feedback: String(cat.feedback || "No feedback")
           }))
-        : [
-            {
-              name: "General Assessment",
-              score: 5,
-              feedback: "Comprehensive analysis could not be generated. Please try again."
-            }
-          ],
-      strengths: Array.isArray(result.strengths) 
-        ? result.strengths.map(s => String(s)).filter(s => s.length > 0)
-        : ["Strong foundational content", "Good structure"],
-      suggestions: Array.isArray(result.suggestions)
-        ? result.suggestions.map(s => String(s)).filter(s => s.length > 0)
-        : ["Add more quantifiable achievements", "Include relevant keywords for your industry"],
+        : [{ name: "General Assessment", score: 5, feedback: "No detailed feedback" }],
+      strengths: Array.isArray(result.strengths) ? result.strengths : ["Relevant experience"],
+      suggestions: Array.isArray(result.suggestions) ? result.suggestions : ["Add measurable results"],
       jobTitleMatch: String(result.jobTitleMatch || "Professional"),
       keywordAnalysis: Array.isArray(result.keywordAnalysis)
         ? result.keywordAnalysis.map(kw => ({
             keyword: String(kw.keyword || ""),
             count: Math.max(Number(kw.count) || 0, 0),
             importance: ["high", "medium", "low"].includes(kw.importance) ? kw.importance : "medium",
-            recommendation: String(kw.recommendation || "Consider adding this keyword")
+            recommendation: String(kw.recommendation || "")
           })).filter(kw => kw.keyword)
         : [],
       atsScore: Math.min(Math.max(Number(result.atsScore) || 60, 0), 100)
     };
 
-    // ✅ Fetch jobs here (after we have jobTitleMatch & strengths)
+    // 🔹 Fetch jobs
     const jobs = await fetchJobs(responseData.jobTitleMatch, responseData.strengths);
 
-    // Ensure we have at least some data
-    if (responseData.suggestions.length === 0) {
-      responseData.suggestions = [
-        "Use more action verbs (e.g., 'managed', 'developed', 'implemented')",
-        "Quantify achievements with numbers and metrics",
-        "Include relevant industry keywords",
-        "Keep resume to 1-2 pages maximum",
-        "Use consistent formatting throughout"
-      ];
-    }
+    // 🔹 Get embedding similarity score
+    const embeddingScore = await getEmbeddingScore(resumeText, responseData.jobTitleMatch);
+    responseData.accuracyScore = embeddingScore.similarity_score || 0;
 
-    if (responseData.strengths.length === 0) {
-      responseData.strengths = [
-        "Clear section organization",
-        "Relevant experience included",
-        "Professional presentation"
-      ];
-    }
-
-    // ✅ Now return jobs with feedback
+    // ✅ Final Response
     return res.json({
       success: true,
       data: responseData,
@@ -354,52 +380,34 @@ app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (r
       metadata: {
         processedLength: resumeText.length,
         analyzedDate: new Date().toISOString(),
-        model: MODEL
+        model: MODEL,
+        embeddingModel: "all-MiniLM-L6-v2"
       }
     });
 
-
   } catch (error) {
     console.error("Resume feedback error:", error);
-    
-    // Provide meaningful error response
+
     if (error.message.includes("timeout")) {
-      return res.status(504).json({
-        success: false,
-        error: "Analysis timeout. Please try again with a shorter resume or check your internet connection."
-      });
+      return res.status(504).json({ success: false, error: "Analysis timeout. Try again." });
     }
-    
-    if (error.message.includes("JSON") || error.message.includes("parse")) {
-      return res.status(500).json({
-        success: false,
-        error: "Failed to process analysis results. Please try again."
-      });
+    if (error.message.includes("JSON")) {
+      return res.status(500).json({ success: false, error: "Failed to parse analysis results." });
     }
-
     if (error.message.includes("short") || error.message.includes("extract")) {
-      return res.status(400).json({
-        success: false,
-        error: "Could not extract sufficient text from the resume. Please ensure the file is readable and try again."
-      });
+      return res.status(400).json({ success: false, error: "Could not extract resume text." });
     }
 
-    return res.status(500).json({
-      success: false,
-      error: "Failed to analyze resume: " + error.message
-    });
-    
+    return res.status(500).json({ success: false, error: "Failed to analyze resume: " + error.message });
   } finally {
-    // Clean up uploaded file
     if (filePath && existsSync(filePath)) {
-      try {
-        unlinkSync(filePath);
-      } catch (cleanupError) {
+      try { unlinkSync(filePath); } catch (cleanupError) {
         console.error("File cleanup error:", cleanupError);
       }
     }
   }
 });
+
 // ----------------- Jobs API -----------------
 app.get("/api/jobs", async (req, res) => {
   try {

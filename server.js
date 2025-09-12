@@ -251,7 +251,7 @@ app.post("/api/resume/feedback", upload.single("resume"), validateFile, async (r
   // 🔹 Helper function to call FastAPI embedding service
   async function getEmbeddingScore(resumeText, jobDescription) {
     try {
-      const response = await fetch(`${process.env.EMBED_API_URL}/match/match`, {
+      const response = await fetch(`${process.env.EMBED_API_URL}/match`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resume_text: resumeText, job_description: jobDescription })
